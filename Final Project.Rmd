@@ -1,0 +1,237 @@
+---
+title: "Final Project"
+author: "HanJungKyu"
+date: "2018년 12월 13일"
+output: word_document
+---
+
+```{r data}
+loan <- read.csv("C:/Users/Han Jung Kyu/Desktop/PBK/kivaloans.csv", header = TRUE)
+MPI <- read.csv("C:/Users/Han Jung Kyu/Desktop/PBK/kiva_mpi_region_locations.csv", header = TRUE)
+```
+
+```{r pkg}
+library(dplyr)
+library(tidyr)
+library(arules)
+library(arulesViz)
+library(cluster)
+library(factoextra)
+library(bindrcpp)
+library(ggplot2)
+library(stats)
+library(datasets)
+library(sm)
+library(lubridate)
+library(rpart)
+library(data.table)
+library(ggridges)
+library(grid)
+library(NbClust)
+```
+
+```{r eda Funded_amount}
+MA <- merge(loan, MPI)
+
+#대륙-나라-funded
+a <- aggregate(funded_amount ~ world_region+country, MA, mean)
+a %>% group_by(world_region)
+a %>% arrange(-funded_amount) %>% mutate(Rank=1:nrow(a)) %>% head(5)
+#나라-sector-funded
+b <- aggregate(funded_amount ~ sector+country, MA, mean)
+b %>% group_by(sector)
+b %>% arrange(-funded_amount) %>% mutate(Rank=1:nrow(b)) %>% head(5)
+#대륙-나라-sector-funded
+ab <- aggregate(funded_amount ~ world_region+country+sector, MA, mean)
+ab %>% group_by(world_region)
+ab %>% arrange(-funded_amount) %>% mutate(Rank=1:nrow(ab)) %>% head(10)
+
+#Funded amount per country
+loans_dt  <- as.data.table(loan)
+nloans <- loans_dt[, .N, by=country]
+nloans$N_z <- round((nloans$N - mean(nloans$N))/sd(nloans$N), 2)
+nloans$type <- ifelse(nloans$N_z < 0, "below", "above")
+nloans <- nloans[order(N_z),]
+nloans$country <- factor(nloans$country, levels = nloans$country)
+nloans <- tail(nloans, 38)
+
+ggplot(nloans, aes(x=country, y=N_z, label=N_z)) +
+  geom_bar(stat='identity', aes(fill=type), width=.5)  +
+  scale_fill_manual(name="Number of loans",
+                    labels = c("Above Average", "Below Average"),
+                    values = c("above"="#42b9ff", "below"="#42f4ee")) +
+  labs(title= "Funded amount per country (Top 38)") + 
+coord_flip()
+```
+-We analyzed Top ranked countries by sector and funded_amouunt. As a result we figured out sub-saharan africa countries are positioned on top of the rank. And also made graph that shows which countries are above average(funded_amount) or below average.
+-You can see which countries have more popularity(analyzed by funded_amount). 
+
+
+```{r eda MPI}
+mpi_nomiss <- MA %>% filter(!is.na(MPI)) %>% select(country, MPI, world_region, MPI)
+funded_nomiss <- MA %>% filter(!is.na(funded_amount)) %>% select(country, funded_amount, world_region, funded_amount)
+
+##World_region's MPI
+
+#Asia mpi
+Asia <- filter(mpi_nomiss, world_region == "South Asia") %>% select(country, MPI)
+aggregate(MPI~country, Asia,mean) %>% 
+  ggplot(aes(x = MPI, y = country, color = MPI)) + geom_point()
+#Asia funded_amount
+Asia <- filter(funded_nomiss, world_region == "South Asia") %>% select(country, funded_amount)
+aggregate(funded_amount~country, Asia,mean) %>% 
+  ggplot(aes(x = funded_amount, y = country, color = funded_amount)) + geom_point()
+
+#Sub-Saharan Africa MPI
+Sub_Saharan_Africa <- filter(mpi_nomiss, world_region == "Sub-Saharan Africa")
+aggregate(MPI~country, Sub_Saharan_Africa,mean) %>% 
+  ggplot(aes(x = MPI, y = country, color = MPI)) + geom_point()
+#Sub-Saharan Africa funded_amount
+Sub_Saharan_Africa <- filter(funded_nomiss, world_region == "Sub-Saharan Africa")
+aggregate(funded_amount~country, Sub_Saharan_Africa,mean) %>% 
+  ggplot(aes(x = funded_amount, y = country, color = funded_amount)) + geom_point()
+
+#Latin America and Caribbean MPI
+Latin_America_and_Caribbean <- filter(mpi_nomiss, world_region == "Latin America and Caribbean")
+aggregate(MPI~country, Latin_America_and_Caribbean, mean) %>% 
+  ggplot(aes(x = MPI, y = country, color = MPI)) + geom_point()
+#Latin America and Caribbean funded_amount
+Latin_America_and_Caribbean <- filter(funded_nomiss, world_region == "Latin America and Caribbean")
+aggregate(funded_amount~country, Latin_America_and_Caribbean, mean) %>% 
+  ggplot(aes(x = funded_amount, y = country, color = funded_amount)) + geom_point()
+
+#East Asia and the Pacific MPI
+East_Asia_and_the_Pacific <- filter(mpi_nomiss, world_region == "East Asia and the Pacific")
+aggregate(MPI~country, East_Asia_and_the_Pacific, mean) %>% 
+  ggplot(aes(x = MPI, y = country, color = MPI)) + geom_point()
+#East Asia and the Pacific funded_amount
+East_Asia_and_the_Pacific <- filter(funded_nomiss, world_region == "East Asia and the Pacific")
+aggregate(funded_amount~country, East_Asia_and_the_Pacific, mean) %>% 
+  ggplot(aes(x = funded_amount, y = country, color = funded_amount)) + geom_point()
+
+#Arab States MPI
+Arab_States <- filter(mpi_nomiss, world_region == "Arab States")
+aggregate(MPI~country, Arab_States, mean) %>% 
+  ggplot( aes(x = MPI, y = country, color = MPI)) + geom_point()
+#Arab States funded_amount
+Arab_States <- filter(funded_nomiss, world_region == "Arab States")
+aggregate(funded_amount~country, Arab_States, mean) %>% 
+  ggplot( aes(x = funded_amount, y = country, color = funded_amount)) + geom_point()
+
+#Barchart MPI-Funded_amount
+MA1 <- select(MA, MPI, world_region) %>% filter(!is.na(MPI))
+MA2 <- select(MA, funded_amount, world_region) %>% filter(!is.na(funded_amount))
+MPI_mean <- tapply(MA1$MPI, MA1$world_region, mean)
+funded_amount_mean <- tapply(MA2$funded_amount, MA2$world_region, mean)
+barplot(MPI_mean,
+        main = "MPI mean per continent",
+               col = "darkred")
+barplot(funded_amount_mean,
+        main = "Fund Amount mean per continent", col = "blue")
+```
+-There are not enough correlation. So we recommend to find other information rather than “MPI” before make decision where to invest.
+-About code, we used function “filter” and “aggregate” to divide our data into continent. After that, we made barplot depend on our data about MPI depend on continent 
+
+
+```{r eda Repayment}
+m<-subset(loan, select=c(term_in_months,repayment_interval))
+aggregate(term_in_months~repayment_interval,m,mean)
+b<-subset(m, repayment_interval == "bullet")
+i<-subset(m, repayment_interval == "irregular")
+n<-subset(m, repayment_interval == "monthly")
+w<-subset(m, repayment_interval == "weekly")
+
+ggplot(b, aes(x=term_in_months, colour = repayment_interval)) + 
+geom_density(fill = NA) + 
+geom_line(stat = "density") + 
+expand_limits(y = 0) + 
+ggtitle("Kernel Density Curve by repayment interval_overlap")
+
+ggplot(i, aes(x=term_in_months, colour = repayment_interval)) + 
+geom_density(fill = NA) + 
+geom_line(stat = "density") + 
+expand_limits(y = 0) + 
+ggtitle("Kernel Density Curve by repayment interval_overlap")
+
+ggplot(n, aes(x=term_in_months, colour = repayment_interval)) + 
+geom_density(fill = NA) + 
+geom_line(stat = "density") + 
+expand_limits(y = 0) + 
+ggtitle("Kernel Density Curve by repayment interval_overlap")
+
+ggplot(w, aes(x=term_in_months, colour = repayment_interval)) + 
+geom_density(fill = NA) + 
+geom_line(stat = "density") + 
+expand_limits(y = 0) + 
+ggtitle("Kernel Density Curve by repayment interval_overlap")
+
+ggplot(loan, aes(x=term_in_months, colour = repayment_interval)) + 
+geom_density(fill = NA) + 
+geom_line(stat = "density") + 
+expand_limits(y = 0) + 
+ggtitle("Kernel Density Curve by repayment interval_overlap")
+```
+-There are four ways in which the investment can be repaid. Depending on how the repayment is made, it is expressed as a function of the density within which the investment is repaid within a few months.
+-The first method, the bullet-paying method, is that most of the people pay the investment in about 14 months.
+-Most of the people who pay the investment irregularly pay off all of their investments in about seven months.
+-Most of the people who make monthly payments pay off their investments in about 14 months.
+-Most of the people who pay off the investment in a weekly manner pay off the investment in about 2.5 months and 7.5 months.
+-In conclusion, it can be seen that the people who pay the weekly pay the fastest, and those who pay the monthly pay back the earliest.
+I analyzed this to see how long it took depending on the repayment method and to help investors make investments.
+
+```{r clustering} 
+loan <- na.omit(loan) 
+loan2 <- select(loan, funded_amount, lender_count, country)
+a <- aggregate(funded_amount~country, loan2, sum)
+b <- aggregate(MPI~country, MA, mean)
+data.frame(a)
+data.frame(b)
+c <- merge(a,b) 
+pc <- pam(c, 3)
+plot(pc, main = 'clusterplot', color=TRUE, shade=TRUE,
+       label=2, lines=0, xlab='funded-count', ylab='MPI')
+plot(c, col=pc$clustering)
+c
+``` 
+-We used clustering to know which countries have similar MPI average and funded_amount average. You can see the each cluster has number and that number mean country(If you want to know each number's country you can find it by searching 'c'). 
+-Assume that you have some money and you are going to invest with that money then you could choose where to invest your money, also consider with MPI.
+
+```{r Regression,,fig.width=14, fig.height=10}
+m <- rpart(term_in_months~funded_amount+sector ,method = "anova",data = loan)
+
+printcp(m)
+
+plotcp(m)
+
+summary(m)
+
+par(mfrow=c(1,2))
+rsq.rpart(m)
+
+plot(m,uniform=TRUE,main="Regression Tree for term in months")
+text(m,use.n=TRUE,all=TRUE,cex=0.9)
+```
+-We wanted to predict term in months using funded amount and sector.
+-Investors can see how long it takes to be repaid their money through how much they invest in which sector.
+
+```{r Association Rules}
+##Association Rules = country <-> sector
+
+country_sector <- select(loan, sector, country)
+country_sector1 <- sample_n(country_sector, 10000)
+country_sector_list <- split(country_sector1$sector, country_sector1$country)
+country_sector_list_trans <- as(country_sector_list, "transactions")
+country_sector_list_rules <- apriori(country_sector_list_trans, parameter = list(supp=0.2,conf=0.9))
+
+##Association Rules = country <-> Sector 시각화 
+inspect(country_sector_list_rules, head=T)
+plot(country_sector_list_rules, method = "grouped", control=list(type="item", main =""))
+plot(country_sector_list_rules, method = "grouped")
+plot(country_sector_list_rules, method = "graph")
+```
+-Figuring out relationship of invested items to help make decision which item to invest depend on previous items
+-As our result you can find out that “Heath and Manufacturing” and “Transportation”, “Education and Health” and “Transportation” sector has high relationship depend on lift. 
+-So, it is better to invest “Transportation” sector, if the previous investment item is “Heath and Manufacturing” or “Education and Health” sector. 
+
+
+
